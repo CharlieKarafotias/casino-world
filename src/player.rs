@@ -5,8 +5,11 @@ pub(super) struct Player {
 }
 
 impl Player {
-    pub fn new(name: impl Into<String> , amount: i32) -> Player {
-        Player { name: name.into(), amount }
+    pub fn new(name: impl Into<String>, amount: i32) -> Player {
+        Player {
+            name: name.into(),
+            amount,
+        }
     }
 
     pub(super) fn get_name(&self) -> &str {
@@ -31,7 +34,13 @@ mod tests {
     #[test]
     fn test_new_player() {
         let player = super::Player::new("John".to_string(), 100);
-        assert_eq!(player, super::Player { name: "John".to_string(), amount: 100 });
+        assert_eq!(
+            player,
+            super::Player {
+                name: "John".to_string(),
+                amount: 100
+            }
+        );
     }
 
     #[test]

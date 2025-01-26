@@ -1,10 +1,11 @@
-use std::sync::{Arc, Mutex};
-use log::{info};
-use super::player::Player;
 use super::crapless::CraplessCraps;
+use super::player::Player;
+use log::info;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
-pub(super) trait Game: Send + Sync{
-    fn run(&mut self);
+pub(super) trait Game: Send + Sync {
+    fn has_player(&self, player: &Arc<RwLock<Player>>) -> bool;
 
     fn has_players(&self) -> bool;
 
@@ -13,9 +14,9 @@ pub(super) trait Game: Send + Sync{
     fn game_id(&self) -> u32;
     fn game_name(&self) -> &str;
 
-    fn add_player(&mut self, player: Arc<Mutex<Player>>);
+    fn add_player(&mut self, player: Arc<RwLock<Player>>);
 
-    fn remove_player(&mut self, player: &Arc<Mutex<Player>>);
+    fn remove_player(&mut self, player: &Arc<RwLock<Player>>);
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -25,13 +26,16 @@ pub(super) struct Bet {
 }
 
 impl Bet {
-    pub(crate) fn new(amount: u32, player: &mut Player) -> Result<Bet,BetError > {
+    pub(crate) fn new(amount: u32, player: &mut Player) -> Result<Bet, BetError> {
         match player.get_amount() >= amount as i32 {
             true => {
                 player.add_amount(-(amount as i32));
-                Ok(Bet { amount, player: Arc::new(player.clone()) })
+                Ok(Bet {
+                    amount,
+                    player: Arc::new(player.clone()),
+                })
             }
-            false => Err(BetError::NotEnoughMoney(player.get_name().to_string()))
+            false => Err(BetError::NotEnoughMoney(player.get_name().to_string())),
         }
     }
 }
@@ -44,7 +48,7 @@ pub enum BetError {
 impl std::fmt::Display for BetError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            BetError::NotEnoughMoney(name) => write!(f, "Not enough money to place bet: {}", name)
+            BetError::NotEnoughMoney(name) => write!(f, "Not enough money to place bet: {}", name),
         }
     }
 }
@@ -64,12 +68,12 @@ mod bet_tests {
 
 #[derive(Debug)]
 pub(super) enum GameNames {
-    Crapless
+    Crapless,
 }
 
 pub struct GameProvider {
     game_name: GameNames,
-    game: Vec<Box<dyn Game>>,
+    game: Vec<Arc<RwLock<dyn Game>>>,
     player_limit: u32,
 }
 
@@ -86,27 +90,60 @@ impl GameProvider {
         &self.game_name
     }
 
-    pub fn add_player_to_game(&mut self, player: Arc<Mutex<Player>>) {
+    pub async fn add_player_to_game(&mut self, player: Arc<RwLock<Player>>) {
         // look for open game and add player
-        for game in self.game.iter_mut() {
+        for game in self.game.iter() {
+            let mut game = game.write().await;
             if game.player_count() < self.player_limit {
-                info!("Adding player {} to game: {} - {}", player.lock().unwrap().get_name(), game.game_name(), game.game_id());
+                info!(
+                    "Adding player {} to game: {} - {}",
+                    player.read().await.get_name(),
+                    game.game_name(),
+                    game.game_id()
+                );
                 game.add_player(player);
                 return;
             }
         }
 
-        info!("Unable to find open game to add player: {}. Creating new session of game: {:#?}", player.lock().unwrap().get_name(), self.game_name);
         match self.game_name {
             GameNames::Crapless => {
-                self.game.push(Box::new(CraplessCraps::new((self.game.len() + 1) as u32, vec![player])));
+                let game_id = (self.game.len() + 1) as u32;
+                let game = Arc::new(RwLock::new(CraplessCraps::new(game_id, vec![player])));
+                self.game.push(game.clone());
+                info!(
+                    "Creating new session of game: {:#?} - {}",
+                    self.game_name,
+                    game_id
+                );
+                // TODO - BUG: existing bug - blocking server
+                tokio::spawn(async move {
+                    let mut game = game.write().await;
+                    game.run().await;
+                });
             }
         }
     }
 
-    pub fn remove_player_from_game(&mut self, player: Arc<Mutex<Player>>) {
-        for game in self.game.iter_mut() {
-            game.remove_player(&player);
+    pub async fn remove_player_from_game(&mut self, player: Arc<RwLock<Player>>) {
+        // find games with player
+        for game in self.game.iter() {
+            let mut game = game.write().await;
+            if game.has_player(&player) {
+                info!(
+                    "Removing player {} from game: {} - {}",
+                    player.read().await.get_name(),
+                    game.game_name(),
+                    game.game_id()
+                );
+                game.remove_player(&player);
+            }
         }
+
+        // TODO: Remove game if no players
+    }
+
+    pub fn game_count(&self) -> u32 {
+        self.game.len() as u32
     }
 }

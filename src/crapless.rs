@@ -1,8 +1,9 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use log::{info, debug};
 use super::game::{Bet, Game};
 use super::player::Player;
+use log::info;
+use std::collections::HashMap;
+use std::sync::Arc;
+use tokio::sync::RwLock;
 
 #[derive(Eq, Hash, PartialEq)]
 enum Position {
@@ -66,7 +67,7 @@ struct CraplessCrapsGameState {
     board: Board,
     point: Option<u8>,
     state: GameState,
-    is_come_out_roll: bool
+    is_come_out_roll: bool,
 }
 
 impl CraplessCrapsGameState {
@@ -103,45 +104,54 @@ impl CraplessCrapsGameState {
 pub(super) struct CraplessCraps {
     game_id: u32,
     game_state: CraplessCrapsGameState,
-    players: Vec<Arc<Mutex<Player>>>,
+    players: Vec<Arc<RwLock<Player>>>,
 }
 
 impl CraplessCraps {
-    pub fn new(game_id: u32, players: Vec<Arc<Mutex<Player>>>) -> Self {
+    pub fn new(game_id: u32, players: Vec<Arc<RwLock<Player>>>) -> Self {
         CraplessCraps {
             game_id,
             game_state: CraplessCrapsGameState::new(),
             players,
         }
     }
-}
 
-impl Game for CraplessCraps {
-    fn run(&mut self) {
+    pub(crate) async fn run(&mut self) {
+        info!(
+            "Started running of {} - {}",
+            self.game_name(),
+            self.game_id()
+        );
         while self.has_players() {
             match (&self.game_state.state, self.game_state.is_come_out_roll()) {
                 (GameState::Betting, true) => {
                     // wait for bets.
                     // switch to rolling
-                },
+                }
                 (GameState::Betting, false) => {
                     // wait for bets.
                     // switch to rolling
-                },
+                }
                 (GameState::Rolling, true) => {
                     // roll dice
                     // come out roll logic.
                     // If point is set, switch to betting, false.
                     // If point is not set, switch to betting, true.
-                },
+                }
                 (GameState::Rolling, false) => {
                     // roll dice
                     // regular roll logic.
                     // If point is hit, switch to betting, true.
                     // If point is not hit, switch to rolling, false.
-                },
+                }
             }
         }
+    }
+}
+
+impl Game for CraplessCraps {
+    fn has_player(&self, player: &Arc<RwLock<Player>>) -> bool {
+        self.players.iter().any(|p| Arc::ptr_eq(p, player))
     }
 
     fn has_players(&self) -> bool {
@@ -160,14 +170,24 @@ impl Game for CraplessCraps {
         "Crapless"
     }
 
-    fn add_player(&mut self, player: Arc<Mutex<Player>>) {
+    fn add_player(&mut self, player: Arc<RwLock<Player>>) {
         self.players.push(player);
     }
 
-    fn remove_player(&mut self, player: &Arc<Mutex<Player>>) {
-        debug!("Player count in {} - {} before remove: {}", self.game_name(), self.game_id(), self.players.len());
+    fn remove_player(&mut self, player: &Arc<RwLock<Player>>) {
+        info!(
+            "Player count in {} - {} before remove: {}",
+            self.game_name(),
+            self.game_id(),
+            self.players.len()
+        );
         self.players.retain(|p| !Arc::ptr_eq(p, &player));
-        debug!("Player count in {} - {} after remove: {}", self.game_name(), self.game_id(), self.players.len());
+        info!(
+            "Player count in {} - {} after remove: {}",
+            self.game_name(),
+            self.game_id(),
+            self.players.len()
+        );
     }
 }
 
@@ -199,7 +219,10 @@ mod board_tests {
         board.add_bet(super::Position::Two, bet2.clone());
         // 1 position has bets on it
         assert_eq!(board.bets.len(), 1);
-        assert_eq!(board.get_bet(super::Position::Two).unwrap(), &vec![bet, bet2]);
+        assert_eq!(
+            board.get_bet(super::Position::Two).unwrap(),
+            &vec![bet, bet2]
+        );
     }
 
     #[test]

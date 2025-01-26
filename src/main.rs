@@ -1,19 +1,19 @@
+mod crapless;
 mod game;
 mod player;
-mod crapless;
 
-use std::{env, io::Error};
-use std::sync::{Arc, Mutex};
+use crate::game::{GameNames, GameProvider};
 use futures_util::{SinkExt, StreamExt};
 use log::{info, warn, LevelFilter};
+use std::sync::Arc;
+use std::{env, io::Error};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::RwLock;
-use tokio_tungstenite::tungstenite::{Message};
-use crate::game::{GameNames, GameProvider};
 use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::RwLock;
+use tokio_tungstenite::tungstenite::Message;
 
 struct GameProviders {
-    crapless: RwLock<GameProvider>
+    crapless: RwLock<GameProvider>,
 }
 
 impl GameProviders {
@@ -26,11 +26,11 @@ impl GameProviders {
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    env_logger::builder()
-        .filter_level(LevelFilter::Debug)
-        .init();
+    env_logger::builder().filter_level(LevelFilter::Info).init();
 
-    let addr = env::args().nth(1).unwrap_or_else(|| "127.0.0.1:8080".to_string());
+    let addr = env::args()
+        .nth(1)
+        .unwrap_or_else(|| "127.0.0.1:8080".to_string());
 
     // Create the event loop and TCP listener we'll accept connections on.
     let try_socket = TcpListener::bind(&addr).await;
@@ -47,26 +47,26 @@ async fn main() -> Result<(), Error> {
 }
 
 async fn accept_connection(stream: TcpStream, game_providers: Arc<GameProviders>) {
-    let addr = stream.peer_addr().expect("connected streams should have a peer address");
-    info!("Peer address: {}", addr);
-
+    let addr = stream
+        .peer_addr()
+        .expect("connected streams should have a peer address");
     let ws_stream = tokio_tungstenite::accept_async(stream)
         .await
         .expect("Error during the websocket handshake occurred");
-
     info!("New WebSocket connection: {}", addr);
 
     let (write, read) = ws_stream.split();
-    let write = Arc::new(TokioMutex::new(write)); // Wrap `write` in Arc<Mutex<_>>.
+    let write = Arc::new(TokioMutex::new(write));
 
-    let player = Arc::new(Mutex::new(player::Player::new(addr.to_string(), 100)));
+    let player = Arc::new(RwLock::new(player::Player::new(addr.to_string(), 100)));
     info!("New Player created: {:?}", player);
 
     // Listen for new messages
     read.for_each(|message| {
-        let write = Arc::clone(&write); // Clone the Arc for each message handler.
+        let write = Arc::clone(&write);
         let game_providers = Arc::clone(&game_providers);
         let player = Arc::clone(&player);
+
         async move {
             if let Ok(msg) = message {
                 if msg.is_text() {
@@ -74,9 +74,13 @@ async fn accept_connection(stream: TcpStream, game_providers: Arc<GameProviders>
                     match text {
                         "Game: Crapless" => {
                             if let Ok(mut provider) = game_providers.crapless.try_write() {
-                                provider.add_player_to_game(Arc::clone(&player));
-                                let mut write_guard = write.lock().await; // Lock the mutex to access `write`.
-                                if let Err(e) = write_guard.send(Message::text("Welcome to the Crapless game!")).await {
+                                // TODO: when awaiting here, it blocks whole server
+                                provider.add_player_to_game(Arc::clone(&player)).await;
+                                let mut write_guard = write.lock().await;
+                                if let Err(e) = write_guard
+                                    .send(Message::text("Welcome to the Crapless game!"))
+                                    .await
+                                {
                                     warn!("Failed to send welcome message: {}", e);
                                 }
                             }
@@ -87,13 +91,17 @@ async fn accept_connection(stream: TcpStream, game_providers: Arc<GameProviders>
                 if msg.is_close() {
                     info!("The client has closed the connection");
                     if let Ok(mut provider) = game_providers.crapless.try_write() {
-                        provider.remove_player_from_game(Arc::clone(&player));
+                        provider.remove_player_from_game(Arc::clone(&player)).await;
                     }
+                    info!(
+                        "Updated game providers: {:#?}",
+                        game_providers.crapless.read().await.game_count()
+                    );
                 }
             } else {
                 warn!("Failed to read message");
             }
         }
     })
-        .await;
+    .await;
 }
