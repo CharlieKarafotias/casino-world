@@ -68,6 +68,10 @@ async fn accept_connection(stream: TcpStream, game_providers: Arc<GameProviders>
         let game_providers = Arc::clone(&game_providers);
         let player = Arc::clone(&player);
 
+        // TODO: refactor
+        // What if game providers only handles the availability of games?
+        // let each game thread control when it should live/die, player connect/disconnect, etc
+        // when event happens, only that game is affected, rest of the games are unaffected
         async move {
             if let Ok(msg) = message {
                 if msg.is_text() {
