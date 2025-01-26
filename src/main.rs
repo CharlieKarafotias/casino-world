@@ -1,3 +1,4 @@
+mod bet;
 mod crapless;
 mod game;
 mod player;

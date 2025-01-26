@@ -1,4 +1,5 @@
-use super::game::{Bet, Game};
+use super::bet::Bet;
+use super::game::Game;
 use super::player::Player;
 use log::info;
 use std::collections::HashMap;
