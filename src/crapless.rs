@@ -4,7 +4,6 @@ use super::player::Player;
 use log::info;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
 #[derive(Eq, Hash, PartialEq)]
 enum Position {
@@ -105,11 +104,11 @@ impl CraplessCrapsGameState {
 pub(super) struct CraplessCraps {
     game_id: u32,
     game_state: CraplessCrapsGameState,
-    players: Vec<Arc<RwLock<Player>>>,
+    players: Vec<Arc<Player>>,
 }
 
 impl CraplessCraps {
-    pub fn new(game_id: u32, players: Vec<Arc<RwLock<Player>>>) -> Self {
+    pub fn new(game_id: u32, players: Vec<Arc<Player>>) -> Self {
         CraplessCraps {
             game_id,
             game_state: CraplessCrapsGameState::new(),
@@ -151,8 +150,8 @@ impl CraplessCraps {
 }
 
 impl Game for CraplessCraps {
-    fn has_player(&self, player: &Arc<RwLock<Player>>) -> bool {
-        self.players.iter().any(|p| Arc::ptr_eq(p, player))
+    fn has_player(&self, player: Arc<Player>) -> bool {
+        self.players.iter().any(|p| Arc::ptr_eq(p, &player))
     }
 
     fn has_players(&self) -> bool {
@@ -171,11 +170,11 @@ impl Game for CraplessCraps {
         "Crapless"
     }
 
-    fn add_player(&mut self, player: Arc<RwLock<Player>>) {
+    fn add_player(&mut self, player: Arc<Player>) {
         self.players.push(player);
     }
 
-    fn remove_player(&mut self, player: &Arc<RwLock<Player>>) {
+    fn remove_player(&mut self, player: Arc<Player>) {
         info!(
             "Player count in {} - {} before remove: {}",
             self.game_name(),
